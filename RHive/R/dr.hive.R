@@ -30,8 +30,6 @@ call.internal <- function(fun) {
 }
 
 
-
-
 ##
 #
 # return hive infomation
@@ -49,10 +47,10 @@ info.hive <- function (host="127.0.0.1", port = 10000, is.server2 = NA) {
 # 
 # return connection
 ##
-connect.hive <- function(info, user=NULL, password=NULL) {
+connect.hive <- function(info, db = "default", user = NULL, password = NULL) {
   init.jvm()
 
-  client <- connect(info$host, as.integer(info$port), user, password)
+  client <- connect(info$host, as.integer(info$port), db, user, password)
   check.jars(client)
 
   register.udfs(client)
@@ -72,7 +70,7 @@ connect.hive <- function(info, user=NULL, password=NULL) {
 # return data frame object
 ##
 query.hive <- function(connection, query, fetchsize=50, limit=-1) {
-  client <- connection$client
+  client <- connection@client
   result <- client$query(query, as.integer(limit), as.integer(fetchsize))
   
   process(result) 
@@ -83,6 +81,44 @@ query.hive <- function(connection, query, fetchsize=50, limit=-1) {
 # return 
 ##
 execute.hive <- function(connection, query) {
+  client <- connection@client
+  client$execute(query)
+}
+
+load.hive <- function(connection, table, subset, columns = "*", strings.as.factors = TRUE) {
+  if (cols != "*") {
+    paste(cols, collapse = ", ")
+  }
+
+  
+}
+
+connection.properties <- function(host, port, db, user, password) {
+  return (java.HiveConnectionProperties(host, port, db, user, password))
+}
+
+async.query.hive <- function(id, query, host = "127.0.0.1", port = 10000L, db = "default", user = NLL, password = NULL) {
+  executor <- async.executor()
+  future <- executor$execute(id, query, connection.properties(host, port, db, user, password))
+  
+  task <- new("async.task", id = id, op = "query", future = future)
+  return (task)
+}
+
+async.execute.hive <- function(id, query, host = "127.0.0.1", port = 10000L, db = "default", user = NLL, password = NULL) {
+  executor <- async.executor()
+  future <- executor$execute(id, query, connection.properties(host, port, db, user, password))
+  
+  task <- new("async.task", id = id, op = "execute", future = future)
+  return (task)
+}
+
+
+##
+#
+# return 
+##
+write.hive <- function(connection, data, table, drop.row.names = TRUE, row.names.column = "rownames") {
 
 }
 
@@ -106,7 +142,7 @@ unset.hive <- function(connection, key) {
 #
 # return 
 ##
-rhive.load <- function(session, tablename) {
+show.databases.hive <- function(connection) {
 
 }
 
@@ -114,16 +150,7 @@ rhive.load <- function(session, tablename) {
 #
 # return 
 ##
-rhive.write <- function(session, tablename, data) {
-
-}
-
-
-##
-#
-# return 
-##
-rhive.show.databases <- function(session) {
+use.database.hive <- function(connection, database) {
 
 }
 
@@ -131,7 +158,7 @@ rhive.show.databases <- function(session) {
 #
 # return 
 ##
-rhive.use.database <- function(session, database) {
+show.tables.hive <- function(connection) {
 
 }
 
@@ -139,7 +166,7 @@ rhive.use.database <- function(session, database) {
 #
 # return 
 ##
-rhive.show.tables <- function(session) {
+desc.table.hive <- function(connection, table, extended=FALSE) {
 
 }
 
@@ -147,7 +174,7 @@ rhive.show.tables <- function(session) {
 #
 # return 
 ##
-rhive.desc.table <- function(session, tablename, extended=FALSE) {
+register.udf.hive <- function(connection) {
 
 }
 
@@ -155,15 +182,7 @@ rhive.desc.table <- function(session, tablename, extended=FALSE) {
 #
 # return 
 ##
-rhive.register.udf <- function(session) {
-
-}
-
-##
-#
-# return 
-##
-rhive.register.udaf <- function(session) {
+register.udaf.hive <- function(connection) {
 
 }
 
@@ -171,7 +190,7 @@ rhive.register.udaf <- function(session) {
 #
 # return table name
 ##
-rhive.mapreduce <- function(session) {
+mapreduce.hive <- function(connection) {
 
 }
 
@@ -179,10 +198,9 @@ rhive.mapreduce <- function(session) {
 #
 # return 
 ##
-rhive.close <- function(session) {
-  session$client$close()
-}
+close.hive <- function(connection) {
 
+}
 
 
 init.jvm <- function() {

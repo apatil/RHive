@@ -1,4 +1,4 @@
-# Copyright 2013 NexR
+# Copyright 2011 NexR
 #    
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+
 
 
 .rhive.init <- function(hiveHome=NULL, hiveLib=NULL, hadoopHome=NULL, hadoopConf=NULL, hadoopLib=NULL, verbose=FALSE) {
@@ -104,9 +105,66 @@
 }
 
 .initJvm <- function(cp) {
- .jinit(classpath=cp, parameters=getOption("java.parameters"))
+ .jinit(classpath=cp, parameters=c(getOption("java.parameters")))
 }
 
+.rhive.connect <- function(host="127.0.0.1", port=10000, hiveServer2=NA, defaultFS=NULL, updateJar=FALSE, user=NULL, password=NULL) {
+
+  initialized <- .getEnv("INITIALIZED")
+  if (is.null(.getEnv("HIVE_HOME")) || is.null(.getEnv("HADOOP_HOME"))) {
+    warning(
+              paste(
+              "\n\t+-------------------------------------------------------------------------------+\n",
+                "\t+ / Can't find the environment variable 'HIVE_HOME' or 'HADOOP_HOME'.           +\n",
+                "\t+ / Retry rhive.connect() after calling rhive.init() with proper arguments.     +\n",
+                "\t+-------------------------------------------------------------------------------+\n", sep=""), call.=FALSE, immediate.=TRUE)
+  } else if (is.null(initialized) || !initialized) {
+    warning(
+              paste(
+              "\n\t+-------------------------------------------------------------------------------+\n",
+                "\t+ / RHive not initialized properly.                                             +\n",
+                "\t+ / Retry rhive.connect() after calling rhive.init() with proper arguments.     +\n",
+                "\t+-------------------------------------------------------------------------------+\n", sep=""), call.=FALSE, immediate.=TRUE)
+
+  } else {
+    if (.isConnected()) {
+     .rhive.close()
+    }
+
+    EnvUtils <- .j2r.EnvUtils()
+    userName <- EnvUtils$getUserName()
+    userHome <- EnvUtils$getUserHome()
+    tmpDir <- EnvUtils$getTempDirectory()
+
+   .setEnv("USERNAME", userName)
+   .setEnv("HOME", userHome)
+   .setEnv("TMP_DIR", tmpDir)
+
+    System <- .j2r.System()
+    System$setProperty("RHIVE_UDF_DIR", .FS_UDF_DIR())
+
+    if (is.null(defaultFS)) {
+      defaultFS <- .DEFAULT_FS()
+    }
+   .rhive.hdfs.connect(defaultFS)
+   .copyJarsToHdfs(updateJar)
+
+    if (is.na(hiveServer2)) {
+      hiveServer2 <- .isForVersion2()
+    }
+
+    hiveClient <- .j2r.HiveJdbcClient(hiveServer2)
+    hiveClient$connect(host, as.integer(port), user, password) 
+    hiveClient$addJar(.FS_JAR_PATH())
+
+   .registerUDFs(hiveClient)
+   .setConfigurations(hiveClient)
+
+   .setEnv("hiveClient", hiveClient)
+
+   .makeBaseDirs()
+  }
+}
 
 .copyJarsToHdfs <- function(updateJar) {
   jar <- paste(system.file(package="RHive"), "java", "rhive_udf.jar", sep=.Platform$file.sep)
@@ -188,20 +246,39 @@
   return (hiveClient)
 }
 
+.isConnected <- function() {
+  hiveClient <- .getEnv("hiveClient")
+  if (!is.null(hiveClient)) {
+    tryCatch ( {
+        hiveClient$checkConnection()  
+      }, error=function(e) { 
+        return (FALSE)
+      }
+    )
+  } else {
+    return (FALSE)
+  }
+
+  return (TRUE)
+}
+
 
 .rhive.close <- function() {
  .rhive.hive.close()
  .rhive.hdfs.close()
-  return(TRUE)
+  return (TRUE)
 }
 
 .rhive.hive.close <- function() {
   hiveClient <- .getHiveClient()
-  hiveClient$close()
- .unsetEnv("hiveClient")
+  if (!is.null(hiveClient)) {
+    hiveClient$close()
+  }
 
+ .unsetEnv("hiveClient")
   return (TRUE)
 }
+
 
 
 .rhive.big.query <- function(query, fetchSize=50, limit=-1, memLimit=64*1024*1024) {
@@ -303,24 +380,35 @@
 .rhive.rm <- .rhive.rm.export
 
 .rhive.export <- function(exportName, pos=-1, limit=100*1024*1024, ALL=FALSE) {
-  if (attr(.rhiveExportEnv, "name") <- "no attribute" == "package:RHive") {
-    print("Can't export 'package:RHive'")
-    return(FALSE)
-  }
-
-  list <- ls(NULL, pos, envir=.rhiveExportEnv)
-
-  total_size <- 0
-  for (item in list) {
-    value <- get(item, pos, envir=.rhiveExportEnv)
-    total_size <- total_size + object.size(value)
-    if (total_size >= limit) {
-      print("Object size limit exceeded")
-    }
-  }
-
   dataPath <- .TMP_FILE(exportName)
-  cmd <- sprintf("save(list=ls(pattern=\"[^exportName]\", envir=.rhiveExportEnv), file=\"%s\", envir=.rhiveExportEnv)", dataPath)
+  if (!ALL) {
+    if (object.size(get(exportName, pos, envir=.rhiveExportEnv)) > limit) {
+      print("Object size limit exceeded")
+      return (FALSE)
+    }
+
+    cmd <-  sprintf("save(%s, file=\"%s\", envir=.rhiveExportEnv)", exportName, dataPath)
+  } else {
+    if (attr(.rhiveExportEnv, "name") <- "no attribute" == "package:RHive") {
+      print("Can't export 'package:RHive'")
+      return(FALSE)
+    }
+
+    list <- ls(NULL, pos, envir=.rhiveExportEnv)
+
+    total_size <- 0
+    for (item in list) {
+      value <- get(item, pos, envir=.rhiveExportEnv)
+      total_size <- total_size + object.size(value)
+      if (total_size > limit) {
+        print("Object size limit exceeded")
+        return (FALSE)
+      }
+    }
+
+    cmd <- sprintf("save(list=ls(pattern=\"[^exportName]\", envir=.rhiveExportEnv), file=\"%s\", envir=.rhiveExportEnv)", dataPath)
+  }
+
   eval(parse(text=cmd))
 
   UDFUtils <- .j2r.UDFUtils()
@@ -420,12 +508,19 @@
     stop("tableName must be string type.")
   }
 
+  res <- NULL
   if (detail) {
     tableInfo <- .rhive.query(paste("DESCRIBE EXTENDED",tableName))
-    return(tableInfo[[2]][length(rownames(tableInfo))])
+    res <- tableInfo[[2]][length(rownames(tableInfo))]
   } else {
-   .rhive.query(paste("DESCRIBE", tableName))
+    res <- .rhive.query(paste("DESCRIBE", tableName))
   }
+
+  if (!is.null(res)) {
+    res <- lapply(res, function(v) { gsub("(^ +)|( +$)", "", v) })
+  }
+
+  return (as.data.frame(res))
 }
 
 .rhive.load.table <- function(tableName, fetchSize=50, limit=-1) {
@@ -794,7 +889,7 @@
 
   tableName <- tolower(tableName)
   metaInfo <- .rhive.desc.table(tableName, detail=TRUE)
-  location <- strsplit(strsplit(paste(metaInfo, ""), "location:")[[1]][2],",")[[1]][1]
+  location <- strsplit(strsplit(as.character(metaInfo[[1]]), "location:")[[1]][2],",")[[1]][1]
   dataInfo <- .rhive.hdfs.du(location, summary=TRUE)
 
   return (dataInfo$length)
@@ -851,4 +946,36 @@
       return (FALSE)
     }
   )
+}
+
+.dfs.get <- function(src, dst) {
+  tryCatch ( {
+    .rhive.execute(sprintf("dfs -get %s %s", src, dst))
+    return (TRUE)
+  }, error=function(e) {
+    return (FALSE)
+  } )
+}
+
+rhive.opt.query <- function(query, data.name, buffer.size=64*1024*1024, group.size=-1) {
+  tbl <- tolower(.HIVE_QUERY_RESULT_TABLE_NAME())
+  dst.dir <- .WORKING_DIR(sub=TRUE)
+  if (!file.exists(dst.dir)) {
+    dir.create(dst.dir, recursive=TRUE)
+  }
+  
+  hiveClient <- .getHiveClient()
+  qry <- sprintf("CREATE TABLE %s ROW FORMAT SERDE 'org.apache.hadoop.hive.serde2.columnar.ColumnarSerDe' STORED AS INPUTFORMAT 'com.nexr.rhive.hive.ql.io.RDFileInputFormat' OUTPUTFORMAT 'com.nexr.rhive.hive.ql.io.RDFileOutputFormat' TBLPROPERTIES ( 'data.name' = '%s', 'buffer.size' = '%d', 'group.size'='%d' ) AS %s", tbl, data.name, buffer.size, group.size, query)
+
+  rhive.execute(qry)
+ .rhive.hdfs.get(sprintf("/user/hive/warehouse/%s", tbl), dst.dir, srcDel=FALSE)
+ 
+  data.dir <- sprintf("%s/%s", dst.dir, tbl)
+  files <- list.files(data.dir, pattern="^[^_]")
+  sapply(files, function(file) { load(sprintf("%s/%s", data.dir, file), envir=globalenv()) })
+  
+  rhive.drop.table(tbl)
+  unlink(dst.dir, recursive=TRUE, force=TRUE)
+  
+  ls(pattern=sprintf("^%s\\..*\\.[0-9]+$", data.name), envir=globalenv())
 }

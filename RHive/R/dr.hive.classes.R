@@ -49,7 +49,7 @@ setClass ("dr.connection",
 
 
 setClass ("hive.connection",
-	representation(client = "jobjRef"),
+	representation (client = "jobjRef"),
 	contains = "dr.connection")
 
 
@@ -69,3 +69,10 @@ setValidity("hive.connection",
 )
 
 
+setClass ("async.task",
+	representation (id = "character",
+			op = "character",
+			future = "jobjRef"),
+	prototype (id = character(0),
+		op = character(0),
+		future = .jnull(class="java/util/concurrent/Future"))) 

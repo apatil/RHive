@@ -1,19 +1,24 @@
 package com.nexr.rhive.hive;
 
+import java.io.File;
+import java.io.IOException;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.StringTokenizer;
+
+import com.nexr.rhive.util.EnvUtils;
  
 public class HiveJdbcClient implements HiveOperations {
 	private DatabaseConnection databaseConnection;
 	private int version;
+	private ResultSet columns;
 	
 
-	public HiveJdbcClient(boolean hiveServer2) {
-		if (hiveServer2) {
+	public HiveJdbcClient(boolean forServer2) {
+		if (forServer2) {
 			this.version = 2;
 		} else {
 			this.version = 1;
@@ -27,6 +32,10 @@ public class HiveJdbcClient implements HiveOperations {
 
 	public void connect(String host, int port, String db) throws SQLException {
 		connect(host, port, db, null, null);
+	}
+
+	public void connect(String host, int port, String user, String password) throws SQLException {
+		connect(host, port, "default", user, password);
 	}
 	
 	public void connect(String host, int port, String db, String user, String password) throws SQLException {
@@ -80,15 +89,19 @@ public class HiveJdbcClient implements HiveOperations {
 		}
 	}
 	
-	ResultSet getColumns(String table) throws SQLException {
+	/*
+	QueryResult getColumns(String table) throws SQLException {
 		DatabaseMetaData databaseMetaData = getDatabaseConnection().getDatabaseMetaData();
-		return databaseMetaData.getColumns(databaseMetaData.getConnection().getCatalog(), null, table, "%");
+		ResultSet rs = databaseMetaData.getColumns(databaseMetaData.getConnection().getCatalog(), null, table, "%");
+		return new QueryResult(rs);
 	}
-
-	ResultSet getTables() throws SQLException {
+	
+	QueryResult getTables() throws SQLException {
 		DatabaseMetaData databaseMetaData = getDatabaseConnection().getDatabaseMetaData();
-		return databaseMetaData.getTables(databaseMetaData.getConnection().getCatalog(), null, "%", new String[] { "TABLE" });
+		ResultSet rs = databaseMetaData.getTables(databaseMetaData.getConnection().getCatalog(), null, "%", new String[] { "TABLE" });
+		return new QueryResult(rs);
 	}
+	*/
 
 	String dequote(String str) {
 		if (str == null) {
@@ -190,6 +203,50 @@ public class HiveJdbcClient implements HiveOperations {
 			if (!reconnect) {
 				if (isThriftTransportException(e)) {
 					return requery(query, maxRows, fetchSize);
+				}
+			}
+			
+			throw e;
+		}
+	}
+
+	public String load(String dataFrame, String query) throws SQLException, IOException {
+		return load(dataFrame, query, 0, 50);
+	}
+
+	public String load(String dataFrame, String query, int fetchSize) throws SQLException, IOException {
+		return load(dataFrame, query, 0, fetchSize);
+	}
+
+	public String load(String dataFrame, String query, int maxRows, int fetchSize) throws SQLException, IOException {
+		return load(dataFrame, query, maxRows, fetchSize, false);
+	}
+	
+	protected String load(String dataFrame, String query, int maxRows, int fetchSize, boolean reconnect) throws SQLException, IOException {
+		Connection connection = getConnection(reconnect);
+		Statement statement = null;
+		try {
+			statement = connection.createStatement();
+			statement.setMaxRows(maxRows < 0 ? 0 : maxRows);
+			statement.setFetchSize(fetchSize);
+			ResultSet rs = statement.executeQuery(query);
+			
+			String wd = EnvUtils.getUserHome();
+			File tmpFile = File.createTempFile(dataFrame, ".RData", new File(wd));
+			String name = tmpFile.getName();
+			
+			long start = System.currentTimeMillis();
+			RSerializer.serialize(dataFrame, tmpFile, rs);
+			System.out.println(System.currentTimeMillis() - start);
+
+			tmpFile.deleteOnExit();
+			
+			return tmpFile.getCanonicalPath();
+
+		} catch (SQLException e) {
+			if (!reconnect) {
+				if (isThriftTransportException(e)) {
+					return load(dataFrame, query, maxRows, fetchSize);
 				}
 			}
 			
@@ -323,9 +380,9 @@ public class HiveJdbcClient implements HiveOperations {
 				databaseConnection = connection;
 			} catch (Exception e) {
 				if (e instanceof RuntimeException) {
-					throw new RuntimeException(e);
-				} else {
 					throw (RuntimeException) e;
+				} else {
+					throw new RuntimeException(e);
 				}
 			}
 		}
@@ -364,5 +421,17 @@ public class HiveJdbcClient implements HiveOperations {
 				return null;
 			}
 		}
+	}
+	
+	
+	public static void main(String[] args) throws SQLException, IOException {
+		HiveJdbcClient client = new HiveJdbcClient(true);
+		client.connect("127.0.0.1", 10000);
+		
+		DatabaseMetaData md = client.getDatabaseMetaData();
+		
+		Connection connection = md.getConnection();
+		System.out.println(connection.getCatalog());
+		System.out.println(connection.getClientInfo());
 	}
 }

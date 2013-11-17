@@ -7,6 +7,7 @@ import java.util.Date;
 import java.util.List;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.ChecksumFileSystem;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.FileUtil;
@@ -221,13 +222,19 @@ public class FSUtils {
 		}
 	}
 
+	
 	public static void copyToLocalFile(boolean delSrc, String src, String dst, String defaultFS) throws IOException {
 		Configuration conf = getConf(defaultFS); 
 		
 		FileSystem fs = null;
 		try {
 			fs = FileSystem.get(conf);
-			fs.copyToLocalFile(delSrc, new Path(src), new Path(dst));
+			
+			if (fs instanceof ChecksumFileSystem && delSrc == false) {
+				((ChecksumFileSystem) fs).copyToLocalFile(new Path(src), new Path(dst), false);
+			} else {
+				fs.copyToLocalFile(delSrc, new Path(src), new Path(dst));
+			}
 		} finally {
 			closeFileSystem(fs);
 		}
