@@ -1,4 +1,4 @@
-# Copyright 2013 NexR
+# Copyright 2014 NexR
 #    
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,7 +14,29 @@
 
 
 
-setClass ("dr.info", 
+setClass ("sys.envir",
+	representation (hive.home = "character",
+			hive.server.version = "integer"),
+	prototype (hive.home = character(0),
+		hive.server.version = integer(0)))	
+
+
+setClass ("config",
+	representation (jvm.params = "character",
+			hiveconf = "character",
+			log.level = "character"),
+	prototype (jvm.params = getOption("java.parameters"),
+		log.level = "warning"))		
+
+
+setClass ("service", 
+	representation (name = "character",
+			obj = "jobjRef"),
+	prototype (name = character(0),
+		obj = .jnull(class="java/lang/Object")))
+
+
+setClass ("info", 
 	representation (host = "character",
 			port = "integer"),
 	prototype (host = "127.0.0.1",
@@ -23,12 +45,12 @@ setClass ("dr.info",
 
 setClass ("hive.info",
 	representation (is.server2 = "logical"),
-	contains = "dr.info",
+	contains = "info",
 	prototype (port = 10000L,
 		is.server2 = TRUE))
 
 
-setClass ("dr.session",
+setClass ("session",
 	representation (user = "character",
 			wd = "character",
 			tempdir = "character"),
@@ -39,18 +61,18 @@ setClass ("dr.session",
 
 setClass ("hive.session",
 	representation (pseudo.user = "character"),
-	contains = "dr.session",
-	prototype (new ("dr.session")))
+	contains = "session",
+	prototype (new ("session")))
 
 
-setClass ("dr.connection",
-	representation (info = "dr.info",
-			session = "dr.session"))
+setClass ("connection",
+	representation (info = "info",
+			session = "session"))
 
 
 setClass ("hive.connection",
 	representation (client = "jobjRef"),
-	contains = "dr.connection")
+	contains = "connection")
 
 
 setValidity("hive.connection",
@@ -69,10 +91,22 @@ setValidity("hive.connection",
 )
 
 
-setClass ("async.task",
+setClass ("async.op",
 	representation (id = "character",
 			op = "character",
 			future = "jobjRef"),
 	prototype (id = character(0),
 		op = character(0),
 		future = .jnull(class="java/util/concurrent/Future"))) 
+
+
+
+setClass ("data.frame.set",
+	representation (id = "character",
+			size = "integer",
+			names = "character",
+			set = "list"),
+	prototype (id = character(0),
+		size = integer(0),
+		names = character(0),
+		set = list()))

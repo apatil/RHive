@@ -1,4 +1,4 @@
-# Copyright 2013 NexR
+# Copyright 2014 NexR
 #    
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,15 +13,17 @@
 # limitations under the License.
 
 
+
+
 call.internal <- function(fun) {
 #  st <- Sys.time()
   tryCatch ( {
-    m <- match.call(definition=fun, call=sys.call(which=-1), expand.dots=TRUE)
+    m <- match.call(definition = fun, call = sys.call(which = -1), expand.dots = TRUE)
     m[[1L]] <- as.name(sprintf("%s.hive", as.character(m[[1L]])))
 
 #    print(sys.call(which=-1))
-    eval(m, envir=parent.frame(n=2))
-  }, error=function(e) {
+    eval(m, envir = parent.frame(n = 2))
+  }, error = function(e) {
     print(e)
   } )
   
@@ -30,45 +32,119 @@ call.internal <- function(fun) {
 }
 
 
-##
-#
-# return hive infomation
-##
-info.hive <- function (host="127.0.0.1", port = 10000, is.server2 = NA) {
+envvar <- function(name) {
+  value <- Sys.getenv(name)
+  if (!is.na(value) && !is.null(value)) {
+    v <- as.character(value)
+    if (nchar(v) > 0) {
+      return (v)
+    }
+  }
+
+  return (NULL)
+}
+
+init.sysenv <- function() {
+  hive.home <- envvar("HIVE_HOME")   
+  hive.server.version <- envvar("HIVESERVER_VERSION")   
+  hive.lib <- envvar("HIVE_LIB_DIR")
+  fs.home <- envvar("HDFS_HOME")  
+
+  sys.env <- new("sysenv", hive.home = hive.home, hive.server.version = hive.server.version, hive.lib = hive.lib, fs.home = fs.home)
+
+  assign("sysenv", sys.env, envir = context) 
+}
+
+sysenv <- function() {
+  get("sysenv", envir = context)
+}
+
+info.hive <- function(host = "127.0.0.1", port = 10000L, is.server2 = NA) {
+  sysenv <- sysenv()
   if (is.na(is.server2)) {
-    # server2 <- 
+    is.server2 <- TRUE
+    if (!is.null(sysenv)) {
+      val <- sysenv@hive.server.version
+      if (!is.null(val)) {
+        ver <- as.integer(val)
+        if (ver == 1L) {
+          is.server2 <- FALSE
+        }
+      }
+    } 
   }
 
   new ("hive.info", host = host, port = port, is.server2 = is.server2)
 }
 
 
-##
-# 
-# return connection
-##
-connect.hive <- function(info, db = "default", user = NULL, password = NULL) {
-  init.jvm()
+configuration <- function() {
+  get("config", envir = context)
+}
 
-  client <- connect(info$host, as.integer(info$port), db, user, password)
+java.classpath <- function() {
+
+}
+
+init.jvm <- function(java.params = getOption("java.parameters")) {
+  cp <- java.classpath()
+  .jinit(classpath=cp, parameters = java.params)
+}
+
+connect.hive <- function(info, db = "default", user = NULL, password = NULL, auth.properties = character(0)) {
+  conf <- configuration()
+  init.jvm(conf@java.params)
+
+  props <- j2r.Properties()
+  if (!is.null(user) && !is.na(user)) {
+    props$setProperty("user", user)
+  }
+
+  if (!is.null(password) && !is.na(password)) {
+    props$setProperty("password", password)
+  }
+
+  if (!is.null(auth.properties) && length(auth.properties)  > 0) {
+    l <- lapply(strsplit(auth.properties, split="="), function(x) { gsub("^\\s+|\\s+$", "", x) })
+    lapply(l, function(p) { if (length(p) == 2) { props$setProperty(p[1], p[2]) } })
+  }
+
+  client <- j2r.HiveJdbcClient(info@is.server2)
+  client$connect(info@host, as.integer(info@port), db, props)
   check.jars(client)
 
-  register.udfs(client)
-  set.configs(client)
+  set.udfs(client)
+  set.hiveconf(client)
 
-  make.basedirs(client)
+  mk.hdfsdirs(client)
 
   if (is.null(user)) {
-    user <- Sys.info()[["user"]] 
+    user <- Sys.info()[["user"]]
   }
 
   new ("hive.connection", info = info, session = new ("hive.session", pseudo.user = user), client = client)
 }
 
-##
-#
-# return data frame object
-##
+check.jars <- function(client) {
+
+}
+
+set.udfs <- function(client) {
+
+}
+
+set.hiveconf(client) {
+
+}
+
+mk.hdfsdirs(client) {
+
+}
+
+
+
+
+
 query.hive <- function(connection, query, fetchsize=50, limit=-1) {
   client <- connection@client
   result <- client$query(query, as.integer(limit), as.integer(fetchsize))
@@ -76,10 +152,7 @@ query.hive <- function(connection, query, fetchsize=50, limit=-1) {
   process(result) 
 }
 
-##
-#
-# return 
-##
+
 execute.hive <- function(connection, query) {
   client <- connection@client
   client$execute(query)
@@ -89,8 +162,6 @@ load.hive <- function(connection, table, subset, columns = "*", strings.as.facto
   if (cols != "*") {
     paste(cols, collapse = ", ")
   }
-
-  
 }
 
 connection.properties <- function(host, port, db, user, password) {
@@ -202,10 +273,6 @@ close.hive <- function(connection) {
 
 }
 
-
-init.jvm <- function() {
-
-}
 
 check.jars <- function(client) {
 
